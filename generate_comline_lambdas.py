@@ -33,7 +33,7 @@ all_opc_data_copying = ' '.join(v[1] for v in opc_datatype_conversion.values() i
 all_opc_data_inits   = ' '.join(v[2] for v in opc_datatype_conversion.values() if v[2])
 
 # generate the std::map code
-header = f'''
+c_definitions = f'''
 #include <map>
 #include <string>
 #include <functional>
@@ -52,18 +52,30 @@ union OpcData {{
 	OpcData(const OpcData& other) {{ {all_opc_data_copying} }}
 	~OpcData() {{}}
 }};
-
-std::map<std::string, std::function<OpcData(UaoClient::{device_class}&)>> _comline_lambdas_{device_class} = {{
 '''
 
-footer = '''};
-'''
-
-cv_pairs = []
+c_map_lambdas_cv_pairs = []
+c_map_types_pairs      = []
 for cv_name, cv_type in dev_cvs:
     func = f'[](UaoClient::{device_class}& dev) -> union OpcData {{union OpcData res; res.{opc_datatype_conversion[cv_type][0]} = dev.read{cv_name}(); return res;}}'
-    cv_pairs.append('  {"%s", %s}' % (cv_name, func))
+    c_map_lambdas_cv_pairs.append('  {"%s", %s}' % (cv_name, func))
 
-print(header)
-print(',\n'.join(cv_pairs))
-print(footer)
+    c_map_types_pairs.append('  {"%s", "%s"}' % (cv_name, cv_type))
+
+
+c_map_lambdas = f'''
+std::map<std::string, std::function<OpcData(UaoClient::{device_class}&)>> _comline_lambdas_{device_class} = {{
+'''
+c_map_lambdas += ',\n'.join(c_map_lambdas_cv_pairs)
+c_map_lambdas += '\n};'
+
+c_map_types = f'''
+std::map<std::string, std::string> _comline_types_{device_class} = {{
+'''
+c_map_types += ',\n'.join(c_map_types_pairs)
+c_map_types += '\n};'
+
+print(c_definitions)
+print(c_map_lambdas)
+print(c_map_types)
+
