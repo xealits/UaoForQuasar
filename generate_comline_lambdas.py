@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup as bs
 
 filename = "../Design/Design.xml"
-device_class = "AMAC"
+device_class = "LpGBT" # "AMAC"
 
 content = []
 
@@ -17,22 +17,52 @@ with open(filename, "r") as file:
 
 design_dev = bs_content.find("d:class", attrs={"name" : device_class})
 
-dev_cvs = [cv.attrs['name'] for cv in design_dev.find_all("d:cachevariable")]
+dev_cvs = [(cv.attrs['name'], cv.attrs['dataType']) for cv in design_dev.find_all("d:cachevariable")]
+
+opc_datatype_conversion = {
+	"OpcUa_Boolean" : ('b'   , 'b = other.b;', ''),
+	"OpcUa_Double"  : ('d'   , 'd = other.d;', ''),
+	"OpcUa_Int16"   : ('i16' , 'i16 = other.i16;', ''),
+	"OpcUa_Int32"   : ('i32' , 'i32 = other.i32;', ''),
+	"OpcUa_Int64"   : ('i64' , 'i64 = other.i64;', ''),
+	"UaString"      : ('s'   , 'new(&s) auto(other.s);', 'new(&s) std::string();'),
+}
+
+all_opc_data_types_string = '\t'.join('%s %s;\n' % (i[0], i[1][0]) for i in opc_datatype_conversion.items())
+all_opc_data_copying = ' '.join(v[1] for v in opc_datatype_conversion.values() if v[1])
+all_opc_data_inits   = ' '.join(v[2] for v in opc_datatype_conversion.values() if v[2])
 
 # generate the std::map code
 header = f'''
 #include <map>
+#include <string>
+#include <functional>
 
-std::map _comline_lambdas_{device_class} = {{
+//dataType="OpcUa_Boolean"
+//dataType="OpcUa_Double"
+//dataType="OpcUa_Int16"
+//dataType="OpcUa_Int32"
+//dataType="OpcUa_Int64"
+//dataType="UaString"
+
+union OpcData {{
+	{all_opc_data_types_string}
+
+	OpcData() {{ {all_opc_data_inits} }}
+	OpcData(const OpcData& other) {{ {all_opc_data_copying} }}
+	~OpcData() {{}}
+}};
+
+std::map<std::string, std::function<OpcData(UaoClient::{device_class}&)>> _comline_lambdas_{device_class} = {{
 '''
 
-footer = '''}
+footer = '''};
 '''
 
 cv_pairs = []
-for cv in dev_cvs:
-    func = f'[](UaoClient::{device_class}& dev) {{return dev.read{cv}();}}'
-    cv_pairs.append('  {"%s", %s}' % (cv, func))
+for cv_name, cv_type in dev_cvs:
+    func = f'[](UaoClient::{device_class}& dev) -> union OpcData {{union OpcData res; res.{opc_datatype_conversion[cv_type][0]} = dev.read{cv_name}(); return res;}}'
+    cv_pairs.append('  {"%s", %s}' % (cv_name, func))
 
 print(header)
 print(',\n'.join(cv_pairs))
